@@ -869,6 +869,14 @@ pub struct AiModelUpdate {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiBulkModelUpdate {
+    pub provider_id: String,
+    pub from_remote: bool,
+    pub model_updates: Vec<AiModelUpdate>,
+    pub remove_model_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AiTextRequest {
     pub provider_id: String,
@@ -1639,36 +1647,13 @@ pub fn set_credential(
 
 #[tracing::instrument(skip(update))]
 pub async fn update_model(update: AiModelUpdate) -> crate::Result<()> {
-    provider_definition(&update.provider_id)?;
-    let model_id = update.model_id.trim();
-    if model_id.is_empty() {
-        return Err(input_error("AI model ID cannot be empty".to_string()));
-    }
-    let display_name = if update.display_name.trim().is_empty() {
-        model_id
-    } else {
-        update.display_name.trim()
-    };
-    let source = if builtin_models(&update.provider_id)
-        .iter()
-        .any(|model| model.id == model_id)
-    {
-        "builtin"
-    } else {
-        "custom"
-    };
-    let state = State::get().await?;
-    sqlx::query(
-		"INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = excluded.display_name, enabled = excluded.enabled, source = CASE WHEN excluded.source = 'builtin' THEN 'builtin' ELSE ai_provider_models.source END",
-	)
-	.bind(&update.provider_id)
-	.bind(model_id)
-	.bind(display_name)
-	.bind(update.enabled)
-	.bind(source)
-	.execute(&state.pool)
-	.await?;
-    Ok(())
+    execute_bulk_model_update(AiBulkModelUpdate {
+        provider_id: update.provider_id.clone(),
+        from_remote: false,
+        model_updates: vec![update],
+        remove_model_ids: Vec::new(),
+    })
+    .await
 }
 
 #[tracing::instrument]
@@ -1676,15 +1661,69 @@ pub async fn remove_model(
     provider_id: String,
     model_id: String,
 ) -> crate::Result<()> {
-    provider_definition(&provider_id)?;
+    execute_bulk_model_update(AiBulkModelUpdate {
+        provider_id: provider_id.clone(),
+        from_remote: false,
+        model_updates: Vec::new(),
+        remove_model_ids: vec![model_id],
+    })
+    .await
+}
+
+#[tracing::instrument(skip(update))]
+pub async fn update_models_bulk(update: AiBulkModelUpdate) -> crate::Result<()> {
+    execute_bulk_model_update(update).await
+}
+
+async fn execute_bulk_model_update(
+    update: AiBulkModelUpdate,
+) -> crate::Result<()> {
+    provider_definition(&update.provider_id)?;
     let state = State::get().await?;
-    sqlx::query(
-        "DELETE FROM ai_provider_models WHERE provider_id = ? AND model_id = ?",
-    )
-    .bind(provider_id)
-    .bind(model_id)
-    .execute(&state.pool)
-    .await?;
+    for model_update in &update.model_updates {
+        let model_id = model_update.model_id.trim();
+        if model_id.is_empty() {
+            return Err(input_error("AI model ID cannot be empty".to_string()));
+        }
+        let display_name = if model_update.display_name.trim().is_empty() {
+            model_id
+        } else {
+            model_update.display_name.trim()
+        };
+        let source = if update.from_remote {
+            "remote"
+        } else if builtin_models(&update.provider_id)
+            .iter()
+            .any(|model| model.id == model_id)
+        {
+            "builtin"
+        } else {
+            "custom"
+        };
+        sqlx::query(
+			"INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = excluded.display_name, enabled = excluded.enabled, source = CASE WHEN excluded.source = 'builtin' THEN 'builtin' ELSE ai_provider_models.source END",
+		)
+		.bind(&update.provider_id)
+		.bind(model_id)
+		.bind(display_name)
+		.bind(model_update.enabled)
+		.bind(source)
+		.execute(&state.pool)
+		.await?;
+    }
+    if !update.remove_model_ids.is_empty() {
+        let placeholders = std::iter::repeat_n("?", update.remove_model_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let delete_sql = format!(
+            "DELETE FROM ai_provider_models WHERE provider_id = ? AND model_id IN ({placeholders})"
+        );
+        let mut query = sqlx::query(&delete_sql).bind(&update.provider_id);
+        for model_id in &update.remove_model_ids {
+            query = query.bind(model_id);
+        }
+        query.execute(&state.pool).await?;
+    }
     Ok(())
 }
 
@@ -3156,18 +3195,15 @@ pub async fn fetch_models(
         ))
         .into());
     }
-    let state = State::get().await?;
-    for (id, name) in &models {
-        sqlx::query(
-			"INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, TRUE, 'remote') ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = CASE WHEN ai_provider_models.source = 'custom' THEN ai_provider_models.display_name ELSE excluded.display_name END",
-		)
-		.bind(&provider_id)
-		.bind(id)
-		.bind(name)
-		.execute(&state.pool)
-		.await?;
-    }
-    load_provider_models(&provider_id).await
+    Ok(models
+        .into_iter()
+        .map(|(id, name)| AiProviderModel {
+            id,
+            name,
+            enabled: true,
+            source: "remote".to_string(),
+        })
+        .collect())
 }
 
 #[tracing::instrument]
