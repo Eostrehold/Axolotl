@@ -727,6 +727,21 @@ const filteredDiscoveredModels = computed(() => {
 	)
 })
 
+const selectableDiscoveredModels = computed(() =>
+	filteredDiscoveredModels.value.filter((model) => !isModelAlreadyConfigured(model.id)),
+)
+const isAllDiscoveredModelsSelected = computed(
+	() =>
+		selectableDiscoveredModels.value.length > 0 &&
+		selectableDiscoveredModels.value.every((model) => discoveredModelSelection.value.has(model.id)),
+)
+const isSomeDiscoveredModelsSelected = computed(
+	() =>
+		discoveredModelSelection.value.size > 0 &&
+		(!isAllDiscoveredModelsSelected.value ||
+			discoveredModelSelection.value.size < filteredDiscoveredModels.value.length),
+)
+
 function toggleDiscoveredModelSelection(modelId: string) {
 	const next = new Set(discoveredModelSelection.value)
 	if (next.has(modelId)) {
@@ -735,6 +750,16 @@ function toggleDiscoveredModelSelection(modelId: string) {
 		next.add(modelId)
 	}
 	discoveredModelSelection.value = next
+}
+
+function toggleSelectAllDiscoveredModels() {
+	if (isAllDiscoveredModelsSelected.value) {
+		discoveredModelSelection.value = new Set()
+	} else {
+		discoveredModelSelection.value = new Set(
+			selectableDiscoveredModels.value.map((model) => model.id),
+		)
+	}
 }
 
 function isModelAlreadyConfigured(modelId: string) {
@@ -1519,6 +1544,14 @@ onMounted(async () => {
 				<SpinnerIcon class="size-6 animate-spin text-secondary" />
 			</div>
 			<div v-else class="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+				<Checkbox
+					v-if="selectableDiscoveredModels.length > 0"
+					:model-value="isAllDiscoveredModelsSelected"
+					:indeterminate="isSomeDiscoveredModelsSelected"
+					:label="formatMessage(messages.selectAllModels)"
+					label-class="text-xs font-semibold text-secondary"
+					@update:model-value="toggleSelectAllDiscoveredModels"
+				/>
 				<div
 					v-for="model in filteredDiscoveredModels"
 					:key="model.id"
