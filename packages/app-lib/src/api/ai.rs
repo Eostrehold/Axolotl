@@ -1680,6 +1680,7 @@ async fn execute_bulk_model_update(
 ) -> crate::Result<()> {
     provider_definition(&update.provider_id)?;
     let state = State::get().await?;
+    let mut tx = state.pool.begin().await?;
     for model_update in &update.model_updates {
         let model_id = model_update.model_id.trim();
         if model_id.is_empty() {
@@ -1708,22 +1709,30 @@ async fn execute_bulk_model_update(
 		.bind(display_name)
 		.bind(model_update.enabled)
 		.bind(source)
-		.execute(&state.pool)
+		.execute(&mut *tx)
 		.await?;
     }
-    if !update.remove_model_ids.is_empty() {
-        let placeholders = std::iter::repeat_n("?", update.remove_model_ids.len())
-            .collect::<Vec<_>>()
-            .join(", ");
+    let removable_model_ids = update
+        .remove_model_ids
+        .iter()
+        .filter(|model_id| {
+            !builtin_models(&update.provider_id)
+                .iter()
+                .any(|model| model.id == **model_id)
+        })
+        .collect::<Vec<_>>();
+    if !removable_model_ids.is_empty() {
+        let placeholders = vec!["?"; removable_model_ids.len()].join(", ");
         let delete_sql = format!(
             "DELETE FROM ai_provider_models WHERE provider_id = ? AND model_id IN ({placeholders})"
         );
         let mut query = sqlx::query(&delete_sql).bind(&update.provider_id);
-        for model_id in &update.remove_model_ids {
-            query = query.bind(model_id);
+        for model_id in &removable_model_ids {
+            query = query.bind(*model_id);
         }
-        query.execute(&state.pool).await?;
+        query.execute(&mut *tx).await?;
     }
+    tx.commit().await?;
     Ok(())
 }
 
