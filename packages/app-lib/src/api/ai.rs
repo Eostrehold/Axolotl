@@ -1454,8 +1454,21 @@ async fn load_provider_models(
             (model.id.clone(), model)
         })
         .collect::<HashMap<_, _>>();
+    let deleted_builtin_ids: std::collections::HashSet<String> = sqlx::query(
+        "SELECT model_id FROM ai_deleted_builtin_models WHERE provider_id = ?",
+    )
+    .bind(provider_id)
+    .fetch_all(&state.pool)
+    .await?
+    .into_iter()
+    .map(|row| row.get("model_id"))
+    .collect();
+    for deleted_id in &deleted_builtin_ids {
+        stored.remove(deleted_id);
+    }
     let mut models = builtin_models(provider_id)
         .iter()
+        .filter(|builtin| !deleted_builtin_ids.contains(&builtin.id))
         .map(|builtin| {
             let saved = stored.remove(&builtin.id);
             AiProviderModel {
@@ -1701,6 +1714,18 @@ async fn execute_bulk_model_update(
         } else {
             "custom"
         };
+        if update.from_remote {
+            let is_deleted_builtin: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM ai_deleted_builtin_models WHERE provider_id = ? AND model_id = ?",
+            )
+            .bind(&update.provider_id)
+            .bind(model_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if is_deleted_builtin != 0 {
+                continue;
+            }
+        }
         sqlx::query(
 			"INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = excluded.display_name, enabled = excluded.enabled, source = CASE WHEN excluded.source = 'builtin' THEN 'builtin' ELSE ai_provider_models.source END",
 		)
@@ -1711,26 +1736,55 @@ async fn execute_bulk_model_update(
 		.bind(source)
 		.execute(&mut *tx)
 		.await?;
-    }
-    let removable_model_ids = update
-        .remove_model_ids
-        .iter()
-        .filter(|model_id| {
-            !builtin_models(&update.provider_id)
-                .iter()
-                .any(|model| model.id == **model_id)
-        })
-        .collect::<Vec<_>>();
-    if !removable_model_ids.is_empty() {
-        let placeholders = vec!["?"; removable_model_ids.len()].join(", ");
-        let delete_sql = format!(
-            "DELETE FROM ai_provider_models WHERE provider_id = ? AND model_id IN ({placeholders})"
-        );
-        let mut query = sqlx::query(&delete_sql).bind(&update.provider_id);
-        for model_id in &removable_model_ids {
-            query = query.bind(*model_id);
+        if source == "builtin" {
+            sqlx::query(
+                "DELETE FROM ai_deleted_builtin_models WHERE provider_id = ? AND model_id = ?",
+            )
+            .bind(&update.provider_id)
+            .bind(model_id)
+            .execute(&mut *tx)
+            .await?;
         }
-        query.execute(&mut *tx).await?;
+    }
+    if !update.remove_model_ids.is_empty() {
+        let builtin_ids: std::collections::HashSet<_> = builtin_models(&update.provider_id)
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect();
+        let (builtin_to_remove, custom_to_remove): (Vec<_>, Vec<_>) = update
+            .remove_model_ids
+            .iter()
+            .partition(|model_id| builtin_ids.contains(model_id.as_str()));
+        if !custom_to_remove.is_empty() {
+            let placeholders = vec!["?"; custom_to_remove.len()].join(", ");
+            let delete_sql = format!(
+                "DELETE FROM ai_provider_models WHERE provider_id = ? AND model_id IN ({placeholders})"
+            );
+            let mut query = sqlx::query(&delete_sql).bind(&update.provider_id);
+            for model_id in &custom_to_remove {
+                query = query.bind(model_id);
+            }
+            query.execute(&mut *tx).await?;
+        }
+        if !builtin_to_remove.is_empty() {
+            let placeholders = vec!["?"; builtin_to_remove.len()].join(", ");
+            let insert_sql = format!(
+                "INSERT OR IGNORE INTO ai_deleted_builtin_models (provider_id, model_id) VALUES (?, {placeholders})"
+            );
+            let mut query = sqlx::query(&insert_sql).bind(&update.provider_id);
+            for model_id in &builtin_to_remove {
+                query = query.bind(model_id.as_str());
+            }
+            query.execute(&mut *tx).await?;
+            let delete_sql = format!(
+                "DELETE FROM ai_provider_models WHERE provider_id = ? AND model_id IN ({placeholders})"
+            );
+            let mut query = sqlx::query(&delete_sql).bind(&update.provider_id);
+            for model_id in &builtin_to_remove {
+                query = query.bind(model_id.as_str());
+            }
+            query.execute(&mut *tx).await?;
+        }
     }
     tx.commit().await?;
     Ok(())
