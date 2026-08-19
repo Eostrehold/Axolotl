@@ -60,6 +60,9 @@
 				},
 				{
 					"url": "https://mod.mcimirror.top/*"
+				},
+				{
+					"url": "https://mod.tianpao.top/*"
 				}
 			]
 		},
@@ -127,6 +130,7 @@
 		"tags:default",
 		"ai:default",
 		"translation:default",
+		"storage:default",
 		"utils:default",
 		"worlds:default",
 		"drop:default",

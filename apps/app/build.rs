@@ -93,6 +93,7 @@ fn main() {
                         "resolve_chinese_content_search",
                         "lookup_chinese_content_names",
                         "lookup_content_wiki_ids",
+                        "lookup_content_identities",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
@@ -311,6 +312,7 @@ fn main() {
                         "instance_get_installed_project_ids",
                         "instance_get_install_candidates",
                         "instance_content",
+                        "instance_get_content_items_by_paths",
                         "instance_get_content_items",
                         "instance_get_content_snapshot",
                         "instance_refresh_content",
@@ -343,6 +345,7 @@ fn main() {
                         "instance_install_datapack_to_world_bytes",
                         "instance_toggle_disable_project",
                         "instance_toggle_content_entry",
+                        "instance_toggle_content_entries",
                         "instance_rollback_project",
                         "instance_remove_project",
                         "instance_remove_content_entry",
@@ -497,6 +500,14 @@ fn main() {
                     ),
             )
             .plugin(
+                "storage",
+                InlinedPlugin::new()
+                    .commands(&["storage_scan_start", "storage_open_paths"])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
                 "files",
                 InlinedPlugin::new()
                     .commands(&[
@@ -564,7 +575,9 @@ fn main() {
                         "terracotta_join",
                         "terracotta_reset",
                         "terracotta_get_platform_key",
+                        "terracotta_check_for_update",
                         "terracotta_download",
+                        "terracotta_update",
                         "terracotta_get_player_name",
                         "terracotta_get_diagnostic_report",
                     ])

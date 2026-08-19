@@ -19,8 +19,9 @@ import {
 } from '@modrinth/ui'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
-import type { GcContext } from '@/helpers/gc/types'
 import { resolveAutoGcArgs } from '@/helpers/gc/auto-selector'
+import type { GcContext } from '@/helpers/gc/types'
+import { lastGcLaunchReport } from '@/helpers/gc-notice'
 import {
 	getJavaArgumentPresets,
 	getPresetsByGroup,
@@ -89,6 +90,10 @@ const messages = defineMessages({
 		id: 'app.java-arguments.presets.gc.auto.reason-chain',
 		defaultMessage: 'Decision path: {chain}',
 	},
+	autoVerified: {
+		id: 'app.java-arguments.presets.gc.auto.verified',
+		defaultMessage: 'Last launch: {chosen}',
+	},
 })
 
 const presets = computed(() => getJavaArgumentPresets(props.gcContext))
@@ -99,14 +104,15 @@ const expandedPresetIds = ref(new Set<string>())
 const expandedGroupIds = ref(new Set<string>())
 const copiedPresetId = ref<string | null>(null)
 
-function getDisplayArgs(preset: JavaArgumentPreset): string {
-	if (preset.id === 'gc-auto') {
-		if (props.showAutoDetails && props.gcContext) {
-			return resolveAutoGcArgs(props.gcContext)
-		}
-		return ''
-	}
+function getPresetArgs(preset: JavaArgumentPreset): string {
 	return preset.resolveArgs ? preset.resolveArgs(props.gcContext) : preset.args
+}
+
+function getDisplayArgs(preset: JavaArgumentPreset): string {
+	if (preset.id === 'gc-auto' && props.showAutoDetails && props.gcContext) {
+		return resolveAutoGcArgs(props.gcContext)
+	}
+	return getPresetArgs(preset)
 }
 
 function getActivePresets(value: string): JavaArgumentPreset[] {
@@ -131,12 +137,12 @@ function getActivePresets(value: string): JavaArgumentPreset[] {
 }
 
 function removePresetArgs(preset: JavaArgumentPreset, args: string): string {
-	const resolvedArgs = getDisplayArgs(preset)
-	if (args.startsWith(resolvedArgs)) {
-		return args.slice(resolvedArgs.length).trimStart()
+	const presetArgs = getPresetArgs(preset)
+	if (args.startsWith(presetArgs)) {
+		return args.slice(presetArgs.length).trimStart()
 	}
 	if (preset.detect && preset.detect(args)) {
-		return args.replace(resolvedArgs, '').trimStart()
+		return args.replace(presetArgs, '').trimStart()
 	}
 	return args
 }
@@ -156,7 +162,7 @@ const activePresets = computed(() => split.value.active)
 const rest = computed<string>({
 	get: () => split.value.rest,
 	set: (value) => {
-		const argsToJoin = activePresets.value.map(getDisplayArgs)
+		const argsToJoin = activePresets.value.map(getPresetArgs)
 		model.value = argsToJoin.length ? argsToJoin.join(' ') + (value ? ` ${value}` : '') : value
 	},
 })
@@ -175,7 +181,7 @@ function removeOtherGroupPresets(preset: JavaArgumentPreset, currentArgs: string
 }
 
 function applyPreset(preset: JavaArgumentPreset) {
-	const argsToApply = getDisplayArgs(preset)
+	const argsToApply = getPresetArgs(preset)
 	const cleanedRest = removeOtherGroupPresets(preset, split.value.rest)
 	model.value = argsToApply + (cleanedRest ? ` ${cleanedRest}` : '')
 }
@@ -239,6 +245,17 @@ function getAutoResolvedLabel(preset: JavaArgumentPreset): string | null {
 function getAutoReasonChainText(preset: JavaArgumentPreset): string | null {
 	if (preset.id !== 'gc-auto' || !preset.autoReasonChain) return null
 	return formatMessage(messages.autoReasonChain, { chain: preset.autoReasonChain.join(' → ') })
+}
+
+function getAutoVerifiedLabel(preset: JavaArgumentPreset): string | null {
+	if (preset.id !== 'gc-auto') return null
+	const notice = lastGcLaunchReport.value
+	if (!notice) return null
+	let chosen = notice.chosen_strategy || 'JVM default GC'
+	if (notice.pruned_args.length > 0) {
+		chosen += ` (${notice.pruned_args.length} pruned)`
+	}
+	return formatMessage(messages.autoVerified, { chosen })
 }
 
 const tagsScrollRef = ref<HTMLElement | null>(null)
@@ -388,6 +405,12 @@ onBeforeUnmount(() => {
 											class="m-0 mt-1 text-xs text-secondary"
 										>
 											{{ getAutoReasonChainText(preset) }}
+										</p>
+										<p
+											v-if="showAutoDetails && getAutoVerifiedLabel(preset)"
+											class="m-0 mt-1 text-xs text-warning-text"
+										>
+											{{ getAutoVerifiedLabel(preset) }}
 										</p>
 									</div>
 									<ButtonStyled :type="isPresetActive(preset) ? 'standard' : 'outlined'" color="brand">

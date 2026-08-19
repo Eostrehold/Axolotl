@@ -238,6 +238,16 @@
 						:waiting="job.status === 'queued' || !hasDeterminateProgress(job)"
 						show-progress
 					/>
+					<div v-if="job.parallel" class="mt-2">
+						<ProgressBar
+							full-width
+							:progress="parallelPercent(job)"
+							:max="100"
+							:label="parallelProgressText(job)"
+							:waiting="job.status === 'queued' || !hasDeterminateParallelProgress(job)"
+							show-progress
+						/>
+					</div>
 				</div>
 
 				<div v-if="job.status === 'waiting_for_user'" class="px-4 pb-4">
@@ -410,6 +420,7 @@ import {
 } from '@/helpers/install'
 import {
 	effectiveInstallProgress,
+	effectiveParallelProgress,
 	hasDeterminateInstallProgress,
 	installProgressTextSource,
 } from '@/helpers/install-progress'
@@ -533,6 +544,7 @@ const messages = defineMessages({
 	downloadSourceOfficial: { id: 'app.downloads.source.official', defaultMessage: 'Official' },
 	downloadSourceBmclapi: { id: 'app.downloads.source.bmclapi', defaultMessage: 'OpenBMCLAPI' },
 	downloadSourceMcim: { id: 'app.downloads.source.mcim', defaultMessage: 'MCIM' },
+	downloadSourceTianpao: { id: 'app.downloads.source.tianpao', defaultMessage: 'Tianpao' },
 	downloadSourceAlternate: {
 		id: 'app.downloads.source.alternate',
 		defaultMessage: 'Alternate source',
@@ -797,15 +809,33 @@ function jobPercent(job: InstallJobSnapshot) {
 	if (job.status === 'waiting_for_user') {
 		const total = totalRequiredFiles(job)
 		if (!total) return 0
-		return Math.min(99, Math.floor((completedRequiredFiles(job) / total) * 100))
+		return Math.min(99, (completedRequiredFiles(job) / total) * 100)
 	}
 	const progress = effectiveInstallProgress(job)
 	if (!hasDeterminateInstallProgress(progress)) return 0
-	return Math.min(99, Math.max(0, Math.floor((progress.current / progress.total) * 100)))
+	return Math.min(99, Math.max(0, (progress.current / progress.total) * 100))
 }
 
 function hasDeterminateProgress(job: InstallJobSnapshot) {
 	return hasDeterminateInstallProgress(effectiveInstallProgress(job))
+}
+
+function parallelPercent(job: InstallJobSnapshot) {
+	const progress = effectiveParallelProgress(job)
+	if (!hasDeterminateInstallProgress(progress)) return 0
+	return Math.min(100, Math.max(0, (progress.current / progress.total) * 100))
+}
+
+function hasDeterminateParallelProgress(job: InstallJobSnapshot) {
+	return hasDeterminateInstallProgress(effectiveParallelProgress(job))
+}
+
+function parallelProgressText(job: InstallJobSnapshot) {
+	const progress = effectiveParallelProgress(job)
+	if (!hasDeterminateInstallProgress(progress)) {
+		return job.parallel ? phaseLabel(job.parallel.phase) : ''
+	}
+	return `${phaseLabel(job.parallel!.phase)}: ${formatBytes(progress.current)} / ${formatBytes(progress.total)}`
 }
 
 function progressText(job: InstallJobSnapshot) {
@@ -910,6 +940,8 @@ function downloadSourceLabel(source: string) {
 			return formatMessage(messages.downloadSourceBmclapi)
 		case 'mcim':
 			return formatMessage(messages.downloadSourceMcim)
+		case 'tianpao':
+			return formatMessage(messages.downloadSourceTianpao)
 		default:
 			return formatMessage(messages.downloadSourceAlternate)
 	}
@@ -983,7 +1015,7 @@ async function openManualDownload(item: DownloadItem) {
 
 function legacyPercent(bar: LoadingBar) {
 	if (!bar.total) return 0
-	return Math.min(100, Math.max(0, Math.round(((bar.current ?? 0) / bar.total) * 100)))
+	return Math.min(100, Math.max(0, ((bar.current ?? 0) / bar.total) * 100))
 }
 
 function formatDate(value: string) {

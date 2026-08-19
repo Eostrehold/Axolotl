@@ -1,7 +1,6 @@
 <script setup>
 import { BoxIcon, FolderOpenIcon, FolderSearchIcon, TrashIcon } from '@modrinth/assets'
 import {
-	ButtonStyled,
 	Combobox,
 	defineMessages,
 	injectNotificationManager,
@@ -9,6 +8,7 @@ import {
 	StyledInput,
 	Toggle,
 	useVIntl,
+	IconButton,
 } from '@modrinth/ui'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -97,9 +97,9 @@ const messages = defineMessages({
 		id: 'app.settings.resources.source.open-bmcl-api',
 		defaultMessage: 'Prefer OpenBMCLAPI',
 	},
-	mcimSource: {
-		id: 'app.settings.resources.source.mcim',
-		defaultMessage: 'Prefer MCIM',
+	tianpaoSource: {
+		id: 'app.settings.resources.source.tianpao',
+		defaultMessage: 'Prefer Tianpao',
 	},
 	minecraftMetadataSource: {
 		id: 'app.settings.resources.minecraft-metadata-source',
@@ -117,13 +117,30 @@ const messages = defineMessages({
 		id: 'app.settings.resources.minecraft-file-source-description',
 		defaultMessage: 'Game files, assets, libraries, mod loaders, and Java runtimes.',
 	},
+	modrinthMirror: {
+		id: 'app.settings.resources.modrinth-mirror',
+		defaultMessage: 'Modrinth',
+	},
+	modrinthMirrorDescription: {
+		id: 'app.settings.resources.modrinth-mirror-description',
+		defaultMessage: 'Modrinth file downloads.',
+	},
 	curseforgeMirror: {
 		id: 'app.settings.resources.curseforge-mirror',
 		defaultMessage: 'CurseForge',
 	},
 	curseforgeMirrorDescription: {
 		id: 'app.settings.resources.curseforge-mirror-description',
-		defaultMessage: 'CurseForge public API requests and file downloads.',
+		defaultMessage: 'CurseForge file downloads.',
+	},
+	curseforgeRestrictionBypass: {
+		id: 'app.settings.resources.curseforge-restriction-bypass',
+		defaultMessage: 'Automatically download restricted CurseForge files',
+	},
+	curseforgeRestrictionBypassDescription: {
+		id: 'app.settings.resources.curseforge-restriction-bypass-description',
+		defaultMessage:
+			'When CurseForge does not provide a download address, derive its CDN address and try downloading the file automatically. Disable this to use the manual download workflow.',
 	},
 	mojangAuthService: {
 		id: 'app.settings.resources.mojang-auth-service',
@@ -240,6 +257,7 @@ function downloadSourceModel(setting) {
 
 const minecraftMetadataSource = downloadSourceModel('minecraft_metadata_source')
 const minecraftFileSource = downloadSourceModel('minecraft_file_source')
+const modrinthDownloadSource = downloadSourceModel('modrinth_source')
 const curseforgeDownloadSource = downloadSourceModel('curseforge_source')
 const automaticSourceOption = computed(() => ({
 	value: 'auto',
@@ -259,10 +277,16 @@ const minecraftSourceOptions = computed(() => [
 	{ value: 'mirror_preferred', label: formatMessage(messages.openBmclApiSource) },
 	officialOnlySourceOption.value,
 ])
-const mcimSourceOptions = computed(() => [
+const modrinthSourceOptions = computed(() => [
 	automaticSourceOption.value,
 	officialPreferredSourceOption.value,
-	{ value: 'mirror_preferred', label: formatMessage(messages.mcimSource) },
+	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
+	officialOnlySourceOption.value,
+])
+const curseforgeSourceOptions = computed(() => [
+	automaticSourceOption.value,
+	officialPreferredSourceOption.value,
+	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
 	officialOnlySourceOption.value,
 ])
 const mojangAuthSource = downloadSourceModel('mojang_auth_source')
@@ -414,11 +438,14 @@ function resetMissingContentImportDirectory() {
 				wrapper-class="w-full"
 			>
 				<template #right>
-					<ButtonStyled circular>
-						<button class="ml-1.5" :disabled="isPortable" @click="findLauncherDir">
-							<FolderSearchIcon />
-						</button>
-					</ButtonStyled>
+					<IconButton
+						:label="formatMessage(messages.appDirectory)"
+						class="ml-1.5"
+						:disabled="isPortable"
+						@click="findLauncherDir"
+					>
+						<FolderSearchIcon />
+					</IconButton>
 				</template>
 			</StyledInput>
 			<p class="m-0 leading-tight text-secondary">
@@ -489,6 +516,20 @@ function resetMissingContentImportDirectory() {
 			<div class="flex items-center justify-between gap-4">
 				<div class="flex flex-col gap-1">
 					<h3 class="m-0 text-base font-semibold text-contrast">
+						{{ formatMessage(messages.modrinthMirror) }}
+					</h3>
+					<p class="m-0 leading-tight text-secondary">
+						{{ formatMessage(messages.modrinthMirrorDescription) }}
+					</p>
+				</div>
+				<div class="w-48 shrink-0">
+					<Combobox v-model="modrinthDownloadSource" :options="modrinthSourceOptions" />
+				</div>
+			</div>
+
+			<div class="flex items-center justify-between gap-4">
+				<div class="flex flex-col gap-1">
+					<h3 class="m-0 text-base font-semibold text-contrast">
 						{{ formatMessage(messages.curseforgeMirror) }}
 					</h3>
 					<p class="m-0 leading-tight text-secondary">
@@ -496,8 +537,23 @@ function resetMissingContentImportDirectory() {
 					</p>
 				</div>
 				<div class="w-48 shrink-0">
-					<Combobox v-model="curseforgeDownloadSource" :options="mcimSourceOptions" />
+					<Combobox v-model="curseforgeDownloadSource" :options="curseforgeSourceOptions" />
 				</div>
+			</div>
+
+			<div class="flex items-center justify-between gap-4">
+				<div class="flex flex-col gap-1">
+					<h3 class="m-0 text-base font-semibold text-contrast">
+						{{ formatMessage(messages.curseforgeRestrictionBypass) }}
+					</h3>
+					<p class="m-0 leading-tight text-secondary">
+						{{ formatMessage(messages.curseforgeRestrictionBypassDescription) }}
+					</p>
+				</div>
+				<Toggle
+					id="curseforge-restriction-bypass"
+					v-model="settings.bypass_curseforge_download_restrictions"
+				/>
 			</div>
 
 			<div class="flex items-center justify-between gap-4">
@@ -597,16 +653,15 @@ function resetMissingContentImportDirectory() {
 				wrapper-class="w-full"
 			>
 				<template #right>
-					<ButtonStyled circular>
-						<button
-							class="ml-1.5"
-							:disabled="!missingContentScannerSettings.enabled"
-							:title="formatMessage(messages.selectImportDirectory)"
-							@click="findMissingContentImportDirectory"
-						>
-							<FolderSearchIcon />
-						</button>
-					</ButtonStyled>
+					<IconButton
+						type="base"
+						:label="formatMessage(messages.selectImportDirectory)"
+						class="ml-1.5"
+						:disabled="!missingContentScannerSettings.enabled"
+						@click="findMissingContentImportDirectory"
+					>
+						<FolderSearchIcon />
+					</IconButton>
 				</template>
 			</StyledInput>
 			<button

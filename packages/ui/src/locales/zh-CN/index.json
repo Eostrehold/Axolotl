@@ -1706,6 +1706,12 @@
 	"installation-settings.loader-version": {
 		"defaultMessage": "{loader} 版本"
 	},
+	"installation-settings.loader-version.error": {
+		"defaultMessage": "无法加载加载器版本"
+	},
+	"installation-settings.loader-version.unsupported": {
+		"defaultMessage": "当前加载器不支持选定的版本"
+	},
 	"installation-settings.platform-lock-tooltip": {
 		"defaultMessage": "你需要重置服务器以切换加载器。"
 	},
@@ -4205,6 +4211,30 @@
 	"drop.generic_install.no_instances": {
 		"message": "未找到实例"
 	},
+	"app.drop.batch.scan.title": {
+		"message": "正在识别 {count, plural, one {# 个文件} other {# 个文件}}…"
+	},
+	"app.drop.batch.scan.subtitle": {
+		"message": "已识别 {done} / {total}"
+	},
+	"app.drop.batch.scan.cancel": {
+		"message": "取消"
+	},
+	"app.drop.batch.scan.pending": {
+		"message": "等待"
+	},
+	"app.drop.batch.scan.scanning": {
+		"message": "扫描中"
+	},
+	"app.drop.batch.scan.done": {
+		"message": "已识别"
+	},
+	"app.drop.batch.scan.skipped": {
+		"message": "已跳过"
+	},
+	"app.drop.batch.scan.error": {
+		"message": "失败"
+	},
 	"drop.launcher_import.title": {
 		"message": "从 {launcherName} 导入实例"
 	},
@@ -4399,5 +4429,11 @@
 	},
 	"drop.confirm.as-data-pack-desc": {
 		"defaultMessage": "将数据包安装到存档"
+	},
+	"installation-settings.loader-version.error": {
+		"defaultMessage": "加载加载器版本数据失败"
+	},
+	"installation-settings.loader-version.unsupported": {
+		"defaultMessage": "此加载器不支持所选游戏版本"
 	}
 }

@@ -14,7 +14,7 @@ const FABRIC_API_PROJECT_ID: &str = "P7dR8mSH";
 const QUILTED_FABRIC_API_PROJECT_ID: &str = "qvIfYCYJ";
 const IRIS_PROJECT_ID: &str = "YL57xq9U";
 const SODIUM_PROJECT_ID: &str = "AANobbMI";
-const MAX_DEPENDENCY_DEPTH: usize = 20;
+const MAX_DEPENDENCY_DEPTH: usize = 32;
 
 // Some Modrinth versions omit required dependencies from their metadata even
 // though the mod JAR itself declares them (e.g. several Iris releases omit
@@ -77,6 +77,8 @@ pub async fn resolve_content<P: ContentMetadataProvider>(
     })
 }
 
+/// Resolves exact versions by identity and applies target filters only when
+/// choosing a version automatically.
 async fn resolve_primary_version<P: ContentMetadataProvider>(
     provider: &mut P,
     request: &ResolveContentRequest,
@@ -162,9 +164,21 @@ impl<'a, P: ContentMetadataProvider> InstallResolver<'a, P> {
 
         while let Some((version, depth)) = stack.pop() {
             if !self.visited_versions.insert(version.id.clone()) {
+                self.skipped.push(SkippedContent {
+                    project_id: version.project_id,
+                    version_id: Some(version.id),
+                    dependent_on_version_id: None,
+                    reason: SkippedReason::DependencyCycle,
+                });
                 continue;
             }
             if depth >= MAX_DEPENDENCY_DEPTH {
+                self.skipped.push(SkippedContent {
+                    project_id: version.project_id,
+                    version_id: Some(version.id),
+                    dependent_on_version_id: None,
+                    reason: SkippedReason::DependencyDepthExceeded,
+                });
                 continue;
             }
 
@@ -331,12 +345,42 @@ fn dependency_metadata_corrections(version: &Version) -> Vec<Dependency> {
 }
 
 fn select_newest_matching_version(
-    mut versions: Vec<Version>,
+    versions: Vec<Version>,
     content_type: ContentType,
     selected: &ResolutionPreferences,
     target: &ResolutionPreferences,
 ) -> Option<Version> {
-    versions.sort_by_key(|version| Reverse(version.date_published));
+    select_matching_version(
+        versions,
+        content_type,
+        selected,
+        target,
+        &[
+            ReleaseChannel::Release,
+            ReleaseChannel::Beta,
+            ReleaseChannel::Alpha,
+        ],
+    )
+}
+
+fn select_matching_version(
+    mut versions: Vec<Version>,
+    content_type: ContentType,
+    selected: &ResolutionPreferences,
+    target: &ResolutionPreferences,
+    channel_order: &[ReleaseChannel],
+) -> Option<Version> {
+    versions.sort_by_key(|version| {
+        (
+            channel_order
+                .iter()
+                .position(|channel| {
+                    *channel == release_channel(&version.version_type)
+                })
+                .unwrap_or(channel_order.len()),
+            Reverse(version.date_published),
+        )
+    });
     let merged = selected.merge(target);
 
     versions
@@ -348,6 +392,23 @@ fn select_newest_matching_version(
                 .find(|version| version_matches(version, content_type, target))
         })
         .cloned()
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ReleaseChannel {
+    Release,
+    Beta,
+    Alpha,
+}
+
+fn release_channel(version_type: &str) -> ReleaseChannel {
+    if version_type.eq_ignore_ascii_case("beta") {
+        ReleaseChannel::Beta
+    } else if version_type.eq_ignore_ascii_case("alpha") {
+        ReleaseChannel::Alpha
+    } else {
+        ReleaseChannel::Release
+    }
 }
 
 trait MergePreferences {
@@ -395,46 +456,23 @@ fn matches_game_versions(
 
 fn matches_loaders(
     version: &Version,
-    content_type: ContentType,
+    _content_type: ContentType,
     preferences: &ResolutionPreferences,
 ) -> bool {
     if preferences.loaders.is_empty() {
         return true;
     }
 
-    let direct_match = preferences.loaders.iter().any(|loader| {
+    preferences.loaders.iter().any(|loader| {
         version
             .loaders
             .iter()
             .any(|candidate| loaders_match(loader, candidate))
-    });
-
-    if direct_match {
-        return true;
-    }
-
-    content_type == ContentType::Mod
-        && version.loaders.iter().any(|loader| loader == "datapack")
+    })
 }
 
 fn loaders_match(expected: &str, candidate: &str) -> bool {
-    let expected = expected.to_lowercase();
-    let candidate = candidate.to_lowercase();
-
-    expected == candidate
-        || loader_aliases(&expected).contains(&candidate.as_str())
-        || loader_aliases(&candidate).contains(&expected.as_str())
-}
-
-fn loader_aliases(loader: &str) -> &'static [&'static str] {
-    match loader {
-        "neoforge" => &["neo"],
-        "neo" => &["neoforge"],
-        "paper" | "purpur" | "spigot" | "bukkit" => {
-            &["paper", "purpur", "spigot", "bukkit"]
-        }
-        _ => &[],
-    }
+    expected.eq_ignore_ascii_case(candidate)
 }
 
 fn should_use_quilted_fabric_api(
